@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import sys
-sys.path.append("boto-2.0b4-py2.6-egg")
+sys.path.append("boto.egg")
 
 import boto
 from boto.s3.key import Key
@@ -84,4 +84,4 @@ def run_optparse(parser):
             print "Missing %s" % option
             sys.exit(1)
 
-    return config
+    return config, args
