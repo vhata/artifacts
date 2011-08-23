@@ -3,33 +3,49 @@
 import sys
 sys.path.append("boto.egg")
 
-import boto
-from boto.s3.key import Key
 import optparse
 import configobj
-from os.path import basename
+import logging
+import os
+import fcntl
+import termios
+import struct
+import base64
+
+import boto
+log = logging.getLogger('artifacts')
+
+PROGRESS_WIDTH=int(0.9*(struct.unpack('hh', fcntl.ioctl(sys.stdin, termios.TIOCGWINSZ, '1234'))[1]))
 
 def print_progress(current, total):
-    print "%s%s (%s/%s)\r" % ('#' * int(current/total*10), ' ' *
-            int((total-current)/total*10), current, total)
+    sys.stdout.write("\r%s%s (%s/%s)" % ('#' * int((1.0*current/total*PROGRESS_WIDTH)), ' ' *
+                            int(1.0*(total-current)/total*PROGRESS_WIDTH), current, total))
 
 class Uploader(object):
     def __init__(self, bucket, access_key, secret_key):
         s3 = boto.connect_s3(access_key, secret_key)
         self.bucket = s3.get_bucket(bucket)
 
-    def upload(self, filename, product, environment=None, version=None):
-        k = Key(self.bucket)
-        k.key = product
+    def upload(self, filename, product, environment=None, version=None, target=None, quiet=False):
+        k = boto.s3.key.Key(self.bucket)
+
+        if not target:
+            target = os.path.basename(filename)
+        prefix = product
         if environment:
-            k.key = "%s/%s" % (k.key, environment)
-        k.key = "%s/%s" % (k.key, basename(filename))
+            prefix = "%s/%s" % (prefix, environment)
+        prefix = "%s/%s" % (prefix, target)
+        k.key = prefix
+
         if version:
             k.set_metadata("version", version)
+
         cb = None
-        if sys.stdout.isatty():
+        if sys.stdout.isatty() and not quiet:
             cb = print_progress
-        k.set_contents_from_filename(filename, cb=cb, reduced_redundancy=True)
+
+        k.set_contents_from_filename(filename, cb=cb, num_cb=-1, reduced_redundancy=True)
+        if cb: sys.stdout.write("\n")
 
 class Downloader(object):
     def __init__(self, bucket, access_key, secret_key):
@@ -42,7 +58,27 @@ class Downloader(object):
             prefix = "%s/%s" % (prefix, environment)
         prefix = "%s/%s" % (prefix, filename)
         keys = self.bucket.get_all_versions(prefix=prefix)
-        return [ self.bucket.get_key(k.name, version_id=k.version_id) for k in keys ]
+        return [ self.bucket.get_key(k.name, version_id=k.version_id) for k in keys if isinstance(k,boto.s3.key.Key)]
+
+    def download(self, filename, product, environment=None, version=None, target=None, quiet=False):
+        if version:
+            version = base64.b64decode(version).strip()
+
+        prefix = product
+        if environment:
+            prefix = "%s/%s" % (prefix, environment)
+        prefix = "%s/%s" % (prefix, filename)
+
+        cb = None
+        if sys.stdout.isatty() and not quiet:
+            cb = print_progress
+
+        if not target:
+            target = os.path.basename(filename)
+
+        k = self.bucket.get_key(prefix, version_id=version)
+        k.get_contents_to_filename(target, cb=cb, num_cb=-1, version_id=version)
+        if cb: sys.stdout.write("\n")
 
 def construct_optparse():
     parser = optparse.OptionParser("usage: %prog [options] product filename [filename ...]")
@@ -51,7 +87,7 @@ def construct_optparse():
             metavar="FILE", help="read config from FILE")
     parser.add_option("-b", "--bucket", dest="bucket",
             type="string",
-            metavar="BUCKET", help="upload to S3 bucket BUCKET")
+            metavar="BUCKET", help="use S3 bucket BUCKET")
     parser.add_option("", "--access-key", dest="access_key",
             type="string",
             help="S3 access key")
@@ -60,10 +96,16 @@ def construct_optparse():
             help="S3 secret key")
     parser.add_option("-v", "--version", dest="version",
             type="string",
-            help="version to label artifact")
+            help="artifact version")
     parser.add_option("-e", "--env", dest="environment",
-            type="string", metavar="ENV",
-            help="upload artifact under environment ENV")
+            type="string", 
+            metavar="ENV", help="environment ENV")
+    parser.add_option("-q", "--quiet", dest="quiet",
+            action="store_true",
+            help="execute quietly")
+    parser.add_option("-t", "--target", dest="target",
+            type="string",
+            metavar="FILE", help="target filename TARGET")
     return parser
 
 def run_optparse(parser):
@@ -73,15 +115,23 @@ def run_optparse(parser):
 
     config = configobj.ConfigObj(options.config)
 
-    for option in ['bucket', 'access_key', 'secret_key', 'version', 'environment']:
+    for option in parser.defaults.keys():
         if getattr(options, option): config[option] = getattr(options, option)
 
     config['product'] = args[0]
     args = args[1:]
 
-    for option in ['bucket', 'access_key', 'secret_key', 'product']:
-        if not config[option]:
-            print "Missing %s" % option
+    if config.get('target', None):
+        if len(args)>1:
+            log.error("Cannot specify a target filename when processing multiple files")
             sys.exit(1)
+
+    missing_opts = []
+    for option in ['bucket', 'access_key', 'secret_key', 'product']:
+        if not config.has_key(option):
+            missing_opts.append(option)
+    if missing_opts:
+        log.error("Missing option%s: %s", ['','s'][len(missing_opts)>1], ", ".join(missing_opts))
+        sys.exit(1)
 
     return config, args
