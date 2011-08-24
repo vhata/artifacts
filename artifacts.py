@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 import sys
-sys.path.append("boto.egg")
-
 import optparse
 import configobj
 import logging
@@ -12,7 +10,9 @@ import termios
 import struct
 import base64
 
+sys.path.append("%s/boto.egg" % os.path.abspath(os.path.dirname(__file__)))
 import boto
+
 log = logging.getLogger('artifacts')
 
 PROGRESS_WIDTH=int(0.9*(struct.unpack('hh', fcntl.ioctl(sys.stdin, termios.TIOCGWINSZ, '1234'))[1]))
