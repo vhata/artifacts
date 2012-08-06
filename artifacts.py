@@ -13,13 +13,14 @@ import base64
 sys.path.append("%s/boto.egg" % os.path.abspath(os.path.dirname(__file__)))
 import boto
 
-log = logging.getLogger('artifacts')
-
-PROGRESS_WIDTH=int(0.9*(struct.unpack('hh', fcntl.ioctl(sys.stdin, termios.TIOCGWINSZ, '1234'))[1]))
-
-def print_progress(current, total):
-    sys.stdout.write("\r%s%s (%s/%s)" % ('#' * int((1.0*current/total*PROGRESS_WIDTH)), ' ' *
-                            int(1.0*(total-current)/total*PROGRESS_WIDTH), current, total))
+def __print_progress__(current, total):
+    '''Print a progress bar if on a terminal'''
+    PROGRESS_WIDTH=int(0.15*(struct.unpack('hh', fcntl.ioctl(sys.stdin, termios.TIOCGWINSZ, '1234'))[1]))
+    # print a progress bar of how complete the download is
+    if total > 0:
+        done_string    = '#' * int((1.0*current/total*PROGRESS_WIDTH))
+        notdone_string = ' ' * int(1.0*(total-current)/total*PROGRESS_WIDTH)
+        sys.stdout.write("\r[%s%s] (%.1f%% of %iKb)" % (done_string, notdone_string, (1.0*current/total)*100, total/1024))
 
 class Uploader(object):
     def __init__(self, bucket, access_key, secret_key):
@@ -42,7 +43,7 @@ class Uploader(object):
 
         cb = None
         if sys.stdout.isatty() and not quiet:
-            cb = print_progress
+            cb = __print_progress__
 
         k.set_contents_from_filename(filename, cb=cb, num_cb=-1, reduced_redundancy=True)
         if cb: sys.stdout.write("\n")
@@ -71,7 +72,7 @@ class Downloader(object):
 
         cb = None
         if sys.stdout.isatty() and not quiet:
-            cb = print_progress
+            cb = __print_progress__
 
         if not target:
             target = os.path.basename(filename)
