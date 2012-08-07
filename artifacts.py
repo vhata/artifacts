@@ -10,6 +10,8 @@ import termios
 import struct
 import base64
 
+log = logging.getLogger(__name__)
+
 sys.path.append("%s/boto.egg" % os.path.abspath(os.path.dirname(__file__)))
 import boto
 
@@ -22,21 +24,24 @@ def __print_progress__(current, total):
         notdone_string = ' ' * int(1.0*(total-current)/total*PROGRESS_WIDTH)
         sys.stdout.write("\r[%s%s] (%.1f%% of %iKb)" % (done_string, notdone_string, (1.0*current/total)*100, total/1024))
 
-class Uploader(object):
+
+class S3Artifacts(object):
+    '''Artifacts backend that uses S3 for storage'''
+
     def __init__(self, bucket, access_key, secret_key):
         s3 = boto.connect_s3(access_key, secret_key)
         self.bucket = s3.get_bucket(bucket)
 
-    def upload(self, filename, product, environment=None, version=None, target=None, quiet=False):
+    def upload(self, filename, product, section=None, version=None, target=None, quiet=False):
         k = boto.s3.key.Key(self.bucket)
 
         if not target:
             target = os.path.basename(filename)
+
         prefix = product
-        if environment:
-            prefix = "%s/%s" % (prefix, environment)
-        prefix = "%s/%s" % (prefix, target)
-        k.key = prefix
+        if section:
+            prefix = "%s/%s" % (prefix, section)
+        k.key = "%s/%s" % (prefix, target)
 
         if version:
             k.set_metadata("version", version)
@@ -48,34 +53,29 @@ class Uploader(object):
         k.set_contents_from_filename(filename, cb=cb, num_cb=-1, reduced_redundancy=True)
         if cb: sys.stdout.write("\n")
 
-class Downloader(object):
-    def __init__(self, bucket, access_key, secret_key):
-        s3 = boto.connect_s3(access_key, secret_key)
-        self.bucket = s3.get_bucket(bucket)
-
-    def get_versions(self, filename, product, environment=None):
+    def get_versions(self, filename, product, section=None):
         prefix = product
-        if environment:
-            prefix = "%s/%s" % (prefix, environment)
+        if section:
+            prefix = "%s/%s" % (prefix, section)
         prefix = "%s/%s" % (prefix, filename)
         keys = self.bucket.get_all_versions(prefix=prefix)
         return [ self.bucket.get_key(k.name, version_id=k.version_id) for k in keys if isinstance(k,boto.s3.key.Key)]
 
-    def download(self, filename, product, environment=None, version=None, target=None, quiet=False):
+    def download(self, filename, product, section=None, version=None, target=None, quiet=False):
         if version:
             version = base64.b64decode(version).strip()
 
         prefix = product
-        if environment:
-            prefix = "%s/%s" % (prefix, environment)
+        if section:
+            prefix = "%s/%s" % (prefix, section)
         prefix = "%s/%s" % (prefix, filename)
+
+        if not target:
+            target = os.path.basename(filename)
 
         cb = None
         if sys.stdout.isatty() and not quiet:
             cb = __print_progress__
-
-        if not target:
-            target = os.path.basename(filename)
 
         k = self.bucket.get_key(prefix, version_id=version)
         k.get_contents_to_filename(target, cb=cb, num_cb=-1, version_id=version)
