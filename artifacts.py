@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 import sys
-import optparse
-import configobj
 import logging
 import os
 import fcntl
@@ -45,8 +43,8 @@ class S3Artifacts(object):
             return "%s/%s" % (prefix, filename)
         return prefix
 
-    def upload(self, filename, product, section=None, target=None,
-               version=None, quiet=False):
+    def upload(self, filename, product, section=None, version=None,
+               target=None, quiet=False):
         k = boto.s3.key.Key(self.bucket)
 
         if not target:
