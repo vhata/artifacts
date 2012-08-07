@@ -37,10 +37,12 @@ class S3Artifacts(object):
         s3 = boto.connect_s3(access_key, secret_key)
         self.bucket = s3.get_bucket(bucket)
 
-    def _get_prefix(self, product, section):
+    def _get_path(self, product, section, filename=None):
         prefix = "%s/%s" % (self.prefix, product)
         if section:
             prefix = "%s/%s" % (prefix, section)
+        if filename:
+            return "%s/%s" % (prefix, filename)
         return prefix
 
     def upload(self, filename, product, section=None, target=None,
@@ -50,7 +52,7 @@ class S3Artifacts(object):
         if not target:
             target = os.path.basename(filename)
 
-        k.key = "%s/%s" % (self._get_prefix(product, section), target)
+        k.key = self._get_path(product, section, target)
 
         if version:
             k.set_metadata("version", version)
@@ -69,7 +71,7 @@ class S3Artifacts(object):
         if version:
             version = base64.b64decode(version).strip()
 
-        prefix = "%s/%s" % (self._get_prefix(product, section), filename)
+        path = self._get_path(product, section, filename)
 
         if not target:
             target = os.path.basename(filename)
@@ -78,15 +80,15 @@ class S3Artifacts(object):
         if sys.stdout.isatty() and not quiet:
             cb = __print_progress__
 
-        k = self.bucket.get_key(prefix, version_id=version)
+        k = self.bucket.get_key(path, version_id=version)
         k.get_contents_to_filename(target, cb=cb, num_cb=-1,
                                    version_id=version)
         if cb:
             sys.stdout.write("\n")
 
     def get_versions(self, filename, product, section=None):
-        prefix = "%s/%s" % (self._get_prefix(product, section), filename)
-        keys = self.bucket.get_all_versions(prefix=prefix)
+        path = self._get_path(product, section, filename)
+        keys = self.bucket.get_all_versions(prefix=path)
         return [self.bucket.get_key(k.name, version_id=k.version_id)
                     for k in keys if isinstance(k, boto.s3.key.Key)]
 
@@ -96,7 +98,7 @@ class S3Artifacts(object):
         Takes the directory tree form of 'product/[env]/filename'
         '''
         files = []
-        prefix = self._get_prefix(product, section)
+        prefix = self._get_path(product, section)
         for k in self.bucket.list(delimiter='/', prefix=prefix):
             if isinstance(k, boto.s3.key.Key):
                 files.append(k.name[len(prefix):])
