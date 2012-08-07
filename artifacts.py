@@ -28,20 +28,23 @@ def __print_progress__(current, total):
 class S3Artifacts(object):
     '''Artifacts backend that uses S3 for storage'''
 
-    def __init__(self, bucket, access_key, secret_key):
+    def __init__(self, bucket, access_key, secret_key, prefix=None):
         s3 = boto.connect_s3(access_key, secret_key)
         self.bucket = s3.get_bucket(bucket)
 
-    def upload(self, filename, product, section=None, version=None, target=None, quiet=False):
+    def _get_prefix(self, product, section):
+        prefix = "%s/%s" % (self.prefix, product)
+        if section:
+            prefix = "%s/%s" % (prefix, section)
+        return prefix
+
+    def upload(self, filename, product, section=None, target=None, version=None, quiet=False):
         k = boto.s3.key.Key(self.bucket)
 
         if not target:
             target = os.path.basename(filename)
 
-        prefix = product
-        if section:
-            prefix = "%s/%s" % (prefix, section)
-        k.key = "%s/%s" % (prefix, target)
+        k.key = "%s/%s" % (self._get_prefix(product, section), target)
 
         if version:
             k.set_metadata("version", version)
@@ -53,22 +56,11 @@ class S3Artifacts(object):
         k.set_contents_from_filename(filename, cb=cb, num_cb=-1, reduced_redundancy=True)
         if cb: sys.stdout.write("\n")
 
-    def get_versions(self, filename, product, section=None):
-        prefix = product
-        if section:
-            prefix = "%s/%s" % (prefix, section)
-        prefix = "%s/%s" % (prefix, filename)
-        keys = self.bucket.get_all_versions(prefix=prefix)
-        return [ self.bucket.get_key(k.name, version_id=k.version_id) for k in keys if isinstance(k,boto.s3.key.Key)]
-
     def download(self, filename, product, section=None, version=None, target=None, quiet=False):
         if version:
             version = base64.b64decode(version).strip()
 
-        prefix = product
-        if section:
-            prefix = "%s/%s" % (prefix, section)
-        prefix = "%s/%s" % (prefix, filename)
+        prefix = "%s/%s" % (self._get_prefix(product, section), filename)
 
         if not target:
             target = os.path.basename(filename)
@@ -80,6 +72,25 @@ class S3Artifacts(object):
         k = self.bucket.get_key(prefix, version_id=version)
         k.get_contents_to_filename(target, cb=cb, num_cb=-1, version_id=version)
         if cb: sys.stdout.write("\n")
+
+    def get_versions(self, filename, product, section=None):
+        prefix = "%s/%s" % (self._get_prefix(product, section), filename)
+        keys = self.bucket.get_all_versions(prefix=prefix)
+        return [ self.bucket.get_key(k.name, version_id=k.version_id) for k in keys if isinstance(k,boto.s3.key.Key)]
+
+    def get_listing(self, product, section=None, limit=25):
+        '''
+        Get file listing for a product and environment
+        Takes the directory tree form of 'product/[env]/filename'
+        '''
+        files=[]
+        prefix = self._get_prefix(product, section)
+        for k in self.bucket.list(delimiter='/', prefix=prefix):
+            if isinstance(k, boto.s3.key.Key):
+                files.append(k.name[len(prefix):])
+            if isinstance(k, boto.s3.prefix.Prefix):
+                files.append(k.name[len(prefix):])
+        return files
 
 def construct_optparse():
     parser = optparse.OptionParser("usage: %prog [options] product filename [filename ...]")
