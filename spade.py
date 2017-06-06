@@ -6,6 +6,7 @@ from optparse import OptionParser
 import sys
 import artifacts
 
+
 log = logging.getLogger(__name__)
 log.addHandler(logging.StreamHandler(sys.stdout))
 
